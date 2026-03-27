@@ -57,6 +57,7 @@ export interface UserProfile {
   businessName?: string;
   businessLocation?: string;
   membershipId?: string;
+  savedEvents?: string[];
 }
 
 export interface Activity {

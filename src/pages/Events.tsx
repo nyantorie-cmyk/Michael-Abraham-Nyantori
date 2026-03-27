@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
-import { Calendar, MapPin, ChevronRight, History, Share2, Facebook, Twitter, MessageCircle, X, Link as LinkIcon, Clock, Users, Star, Loader2 } from 'lucide-react';
+import { Calendar, MapPin, ChevronRight, History, Share2, Facebook, Twitter, MessageCircle, X, Link as LinkIcon, Clock, Users, Star, Loader2, Heart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { RegistrationModal } from '../components/RegistrationModal';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { WineEvent } from '../types';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { WineEvent, UserProfile } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -109,9 +110,11 @@ interface EventCardProps {
   activeTab: 'upcoming' | 'past';
   onRegister: (event: WineEvent) => void;
   onShare: (event: WineEvent) => void;
+  isSaved: boolean;
+  onToggleSave: (eventId: string) => void;
 }
 
-const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegister, onShare }) => {
+const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegister, onShare, isSaved, onToggleSave }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({
     target: cardRef,
@@ -126,57 +129,71 @@ const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegist
       initial={{ opacity: 0, y: 40 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-50px" }}
-      whileHover={{ y: -12 }}
+      whileHover={{ y: -12, scale: 1.01 }}
       transition={{ 
         delay: index * 0.05,
         duration: 0.6,
         ease: [0.22, 1, 0.36, 1]
       }}
-      className="group relative h-[480px] rounded-[3.5rem] overflow-hidden shadow-xl hover:shadow-3xl transition-all duration-700 border border-wine-black/5"
+      className="group relative h-[520px] rounded-[3.5rem] overflow-hidden shadow-xl hover:shadow-3xl transition-all duration-700 border border-wine-black/5"
     >
       <div className="absolute inset-0 overflow-hidden">
         <motion.img 
           style={{ y }}
           src={event.image} 
           alt={event.title} 
-          className="absolute inset-0 w-full h-[120%] object-cover group-hover:scale-105 transition-transform duration-1000 ease-out"
+          className="absolute inset-0 w-full h-[120%] object-cover group-hover:scale-110 transition-transform duration-1000 ease-out"
           referrerPolicy="no-referrer"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-wine-black via-wine-black/40 to-transparent opacity-80 group-hover:opacity-90 transition-opacity duration-700" />
-        <div className="absolute inset-0 bg-wine-red/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+        <div className="absolute inset-0 bg-gradient-to-t from-wine-black via-wine-black/60 to-transparent opacity-85 group-hover:opacity-95 transition-opacity duration-700" />
+        <div className="absolute inset-0 bg-wine-red/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
       </div>
       
       <div className="relative h-full p-10 flex flex-col justify-end">
-        <div className="absolute top-10 left-10 flex flex-col gap-3">
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            className="bg-white/95 backdrop-blur-2xl px-5 py-2.5 rounded-2xl flex items-center gap-3 shadow-2xl border border-white/30"
-          >
-            <Calendar className="w-4 h-4 text-wine-red" />
-            <span className="text-xs font-bold text-wine-black tracking-tight">{event.date}</span>
-          </motion.div>
-          {event.price !== undefined && (
+        <div className="absolute top-10 left-10 right-10 flex justify-between items-start">
+          <div className="flex flex-col gap-3">
             <motion.div 
               initial={{ opacity: 0, x: -20 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
-              transition={{ delay: 0.1 }}
-              className="bg-wine-red text-white px-5 py-2.5 rounded-2xl flex items-center gap-2 shadow-2xl w-fit border border-wine-red/20"
+              className="bg-white/95 backdrop-blur-2xl px-5 py-2.5 rounded-2xl flex items-center gap-3 shadow-2xl border border-white/30"
             >
-              <span className="text-xs font-bold tracking-tight">
-                {typeof event.price === 'number' ? `$${event.price}` : event.price}
-              </span>
+              <Calendar className="w-4 h-4 text-wine-red" />
+              <span className="text-xs font-bold text-wine-black tracking-tight">{event.date}</span>
             </motion.div>
-          )}
+            {event.price !== undefined && (
+              <motion.div 
+                initial={{ opacity: 0, x: -20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.1 }}
+                className="bg-wine-red text-white px-5 py-2.5 rounded-2xl flex items-center gap-2 shadow-2xl w-fit border border-wine-red/20"
+              >
+                <span className="text-xs font-bold tracking-tight">
+                  {typeof event.price === 'number' ? `$${event.price}` : event.price}
+                </span>
+              </motion.div>
+            )}
+          </div>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSave(event.id);
+            }}
+            className={`p-4 rounded-2xl backdrop-blur-2xl transition-all duration-500 shadow-2xl border border-white/30 active:scale-90 ${
+              isSaved ? 'bg-wine-red text-white' : 'bg-white/90 text-wine-black hover:bg-wine-red hover:text-white'
+            }`}
+          >
+            <Heart className={`w-6 h-6 ${isSaved ? 'fill-current' : ''}`} />
+          </button>
         </div>
 
-        <div className="space-y-5 mb-10 transform group-hover:translate-y-[-8px] transition-transform duration-700 ease-out">
-          <div className="space-y-3">
-            <h3 className="text-4xl font-serif font-bold text-white leading-tight drop-shadow-2xl tracking-tight">{event.title}</h3>
-            <div className="flex items-center gap-3 text-white/80 text-sm font-semibold">
-              <div className="p-2 bg-white/10 rounded-xl backdrop-blur-xl border border-white/10">
+        <div className="space-y-6 mb-10 transform group-hover:translate-y-[-8px] transition-transform duration-700 ease-out">
+          <div className="space-y-4">
+            <h3 className="text-4xl sm:text-5xl font-serif font-bold text-white leading-tight drop-shadow-2xl tracking-tight">{event.title}</h3>
+            <div className="flex items-center gap-3 text-white/90 text-sm font-semibold">
+              <div className="p-2.5 bg-white/15 rounded-xl backdrop-blur-xl border border-white/10 shadow-lg">
                 <MapPin className="w-4 h-4" />
               </div>
               <span className="drop-shadow-md">{event.location}</span>
@@ -186,17 +203,17 @@ const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegist
           {(event.hosts && event.hosts.length > 0 || event.specialGuest) && (
             <div className="flex flex-wrap gap-3 py-1">
               {event.hosts && event.hosts.length > 0 && (
-                <div className="flex items-center gap-2.5 bg-white/10 backdrop-blur-2xl px-4 py-2 rounded-xl border border-white/10 shadow-lg">
+                <div className="flex items-center gap-2.5 bg-white/15 backdrop-blur-2xl px-4 py-2.5 rounded-xl border border-white/10 shadow-lg">
                   <Users className="w-4 h-4 text-wine-gold" />
-                  <span className="text-[11px] font-bold text-white/90 uppercase tracking-widest">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-widest">
                     {event.hosts.join(' • ')}
                   </span>
                 </div>
               )}
               {event.specialGuest && (
-                <div className="flex items-center gap-2.5 bg-wine-red/40 backdrop-blur-2xl px-4 py-2 rounded-xl border border-wine-red/30 shadow-lg">
+                <div className="flex items-center gap-2.5 bg-wine-red/50 backdrop-blur-2xl px-4 py-2.5 rounded-xl border border-wine-red/30 shadow-lg">
                   <Star className="w-4 h-4 text-wine-gold fill-wine-gold" />
-                  <span className="text-[11px] font-bold text-white/90 uppercase tracking-widest">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-widest">
                     Guest: {event.specialGuest}
                   </span>
                 </div>
@@ -204,7 +221,7 @@ const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegist
             </div>
           )}
 
-          <p className="text-white/70 text-base line-clamp-2 leading-relaxed font-medium max-w-[90%] drop-shadow-md">
+          <p className="text-white/80 text-base line-clamp-2 leading-relaxed font-medium max-w-[90%] drop-shadow-md">
             {event.description}
           </p>
         </div>
@@ -219,13 +236,13 @@ const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegist
               <ChevronRight className="w-5 h-5 group-hover/btn:translate-x-1 transition-transform" />
             </button>
           ) : (
-            <button className="flex-1 bg-white/10 backdrop-blur-xl text-white py-5 rounded-[1.75rem] font-bold hover:bg-white/20 transition-all duration-500 flex items-center justify-center gap-3 border border-white/10 active:scale-95">
+            <button className="flex-1 bg-white/15 backdrop-blur-xl text-white py-5 rounded-[1.75rem] font-bold hover:bg-white/25 transition-all duration-500 flex items-center justify-center gap-3 border border-white/10 active:scale-95">
               View Highlights <History className="w-5 h-5" />
             </button>
           )}
           <button 
             onClick={() => onShare(event)}
-            className="p-5 bg-white/10 backdrop-blur-xl rounded-[1.75rem] text-white hover:bg-wine-red hover:scale-110 transition-all duration-500 border border-white/10 active:scale-95 shadow-xl"
+            className="p-5 bg-white/15 backdrop-blur-xl rounded-[1.75rem] text-white hover:bg-wine-red hover:scale-110 transition-all duration-500 border border-white/10 active:scale-95 shadow-xl"
             title="Share Event"
           >
             <Share2 className="w-6 h-6" />
@@ -237,11 +254,32 @@ const EventCard: React.FC<EventCardProps> = ({ event, index, activeTab, onRegist
 };
 
 export default function Events() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
   const [dynamicEvents, setDynamicEvents] = useState<WineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<WineEvent | null>(null);
   const [registeringEvent, setRegisteringEvent] = useState<WineEvent | null>(null);
+
+  const savedEvents = (user as any)?.savedEvents || [];
+
+  const handleToggleSave = async (eventId: string) => {
+    if (!user) {
+      alert('Please sign in to save events');
+      return;
+    }
+
+    const userRef = doc(db, 'users', user.uid);
+    const isSaved = savedEvents.includes(eventId);
+
+    try {
+      await updateDoc(userRef, {
+        savedEvents: isSaved ? arrayRemove(eventId) : arrayUnion(eventId)
+      });
+    } catch (error) {
+      console.error('Error toggling save event:', error);
+    }
+  };
 
   useEffect(() => {
     const eventsRef = collection(db, 'events');
@@ -309,6 +347,8 @@ export default function Events() {
             activeTab={activeTab}
             onRegister={(ev) => setRegisteringEvent(ev)}
             onShare={(ev) => setSelectedEvent(ev)}
+            isSaved={savedEvents.includes(event.id)}
+            onToggleSave={handleToggleSave}
           />
         ))}
       </div>

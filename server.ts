@@ -12,21 +12,77 @@ const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json
 
 if (!admin.apps.length) {
   try {
+    console.log(`Initializing Firebase Admin for project: ${firebaseConfig.projectId}`);
+    // In Cloud Run, applicationDefault() should automatically pick up the right credentials
     admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: firebaseConfig.projectId
+      projectId: firebaseConfig.projectId,
+      storageBucket: firebaseConfig.storageBucket
     });
-  } catch (error) {
-    console.warn("Firebase Admin could not be initialized with applicationDefault. Push notifications may not work until a service account is provided.");
-    // Fallback for local dev if needed, but usually applicationDefault is what we want in Cloud Run
-    admin.initializeApp({
-      projectId: firebaseConfig.projectId
-    });
+    console.log("Firebase Admin initialized successfully.");
+  } catch (error: any) {
+    console.error("Firebase Admin initialization failed:", error.message);
   }
 }
 
-const db = getFirestore(firebaseConfig.firestoreDatabaseId || '(default)');
+// Ensure we use the correct database ID and project ID
+let db: admin.firestore.Firestore;
+const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+try {
+  console.log(`Using Firestore database: ${dbId}`);
+  db = getFirestore(dbId);
+} catch (error: any) {
+  console.warn(`Failed to initialize Firestore with database ID ${dbId}. Falling back to default.`);
+  db = getFirestore();
+}
 const messaging = getMessaging();
+
+const OperationType = {
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  LIST: 'list',
+  GET: 'get',
+  WRITE: 'write',
+} as const;
+
+type OperationType = typeof OperationType[keyof typeof OperationType];
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: any;
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    operationType,
+    path,
+    authInfo: "Server-side admin operation"
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+async function testConnection() {
+  try {
+    console.log("Testing Firestore connection...");
+    // Use admin SDK methods for testing connection
+    await db.doc('test/connection').get();
+    console.log("Firestore connection test successful.");
+  } catch (error: any) {
+    if (error.message.includes('the client is offline') || error.message.includes('PERMISSION_DENIED')) {
+      console.error("CRITICAL: Firestore connection failed. Please check your Firebase configuration and permissions.");
+      console.error("Error details:", error.message);
+    } else {
+      // It's okay if the document doesn't exist, as long as we don't get a permission error
+      console.log("Firestore connection test completed (document may not exist, but no permission error).");
+    }
+  }
+}
+
+testConnection();
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -126,8 +182,18 @@ async function startServer() {
     }
 
     try {
-      const userDoc = await db.collection("users").doc(userId).get();
+      console.log(`Attempting to send notification to user ${userId}`);
+      
+      let userDoc;
+      try {
+        userDoc = await db.collection("users").doc(userId).get();
+      } catch (dbError: any) {
+        handleFirestoreError(dbError, OperationType.GET, `users/${userId}`);
+        return; // Unreachable but for TS
+      }
+
       if (!userDoc.exists) {
+        console.warn(`User ${userId} not found in Firestore`);
         return res.status(404).json({ error: "User not found" });
       }
 
@@ -135,6 +201,7 @@ async function startServer() {
       const tokens = userData?.fcmTokens || [];
 
       if (tokens.length === 0) {
+        console.log(`No FCM tokens found for user ${userId}`);
         return res.json({ success: true, message: "No tokens found for user" });
       }
 
@@ -144,7 +211,16 @@ async function startServer() {
         tokens: tokens
       };
 
-      const response = await messaging.sendEachForMulticast(message);
+      console.log(`Sending multicast message to ${tokens.length} tokens`);
+      
+      let response;
+      try {
+        response = await messaging.sendEachForMulticast(message);
+      } catch (msgError: any) {
+        console.error("FCM error sending multicast:", msgError);
+        throw msgError;
+      }
+
       console.log(`Successfully sent ${response.successCount} messages to user ${userId}`);
 
       // Cleanup invalid tokens
@@ -161,17 +237,25 @@ async function startServer() {
         });
         
         if (failedTokens.length > 0) {
-          await db.collection("users").doc(userId).update({
-            fcmTokens: FieldValue.arrayRemove(...failedTokens)
-          });
-          console.log(`Removed ${failedTokens.length} invalid tokens for user ${userId}`);
+          try {
+            await db.collection("users").doc(userId).update({
+              fcmTokens: FieldValue.arrayRemove(...failedTokens)
+            });
+            console.log(`Removed ${failedTokens.length} invalid tokens for user ${userId}`);
+          } catch (updateError: any) {
+            handleFirestoreError(updateError, OperationType.UPDATE, `users/${userId}`);
+          }
         }
       }
 
       res.json({ success: true, count: response.successCount });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending push notification:", error);
-      res.status(500).json({ error: "Failed to send push notification" });
+      res.status(500).json({ 
+        error: "Failed to send push notification", 
+        details: error.message,
+        code: error.code
+      });
     }
   });
 

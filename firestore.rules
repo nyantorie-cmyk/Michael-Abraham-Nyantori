@@ -12,8 +12,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && (
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email == "Nyantorie@gmail.com" && request.auth.token.email_verified == true)
       );
     }
 
@@ -24,6 +25,7 @@ service cloud.firestore {
              data.email is string &&
              (!('role' in data) || (data.role in ['admin', 'user'])) &&
              (!('photoURL' in data) || (data.photoURL is string)) &&
+             (!('phone' in data) || (data.phone is string)) &&
              (!('loyaltyScore' in data) || (data.loyaltyScore is number)) &&
              (!('type' in data) || (data.type in ['Individual', 'Business'])) &&
              (!('friends' in data) || (data.friends is list)) &&
@@ -37,6 +39,7 @@ service cloud.firestore {
              (!('referralCode' in data) || (data.referralCode is string)) &&
              (!('photos' in data) || (data.photos is list)) &&
              (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('createdAt' in data) || (data.createdAt is timestamp || data.createdAt is string)) &&
              (!('id' in data) || data.id is string);
     }
 

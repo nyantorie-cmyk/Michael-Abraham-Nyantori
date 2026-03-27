@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
-import { Award, History, Star, Mail, Lock, ArrowRight, X, Phone, User, ShieldCheck, Camera, Plus, Image as ImageIcon, MapPin, Tag, Trophy, Medal, CheckCircle2, Ticket as TicketIcon, Download, QrCode, Trash2, Loader2, Share2, Calendar, ShoppingBag, Hash, Bell, ChevronRight } from 'lucide-react';
+import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
+import { Award, History, Star, Mail, Lock, ArrowRight, X, Phone, User, ShieldCheck, Camera, Plus, Image as ImageIcon, MapPin, Tag, Trophy, Medal, CheckCircle2, Ticket as TicketIcon, Download, QrCode, Trash2, Loader2, Share2, Calendar, ShoppingBag, Hash, Bell, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import { UserPhoto, Ticket } from '../types';
@@ -45,17 +45,21 @@ export default function Profile() {
   const isAdmin = dbUser?.role === 'admin';
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentMessage, setPaymentMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showPhotoDeleteConfirm, setShowPhotoDeleteConfirm] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [claimCode, setClaimCode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const [claimStatus, setClaimStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [qrClaims, setQrClaims] = useState<any[]>([]);
   const [isMembershipDetailsOpen, setIsMembershipDetailsOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,9 +147,16 @@ export default function Profile() {
         setTickets(ticketData);
       });
 
+      // Real-time QR claims listener
+      const qrClaimsQuery = query(collection(db, 'qrclaims'), where('userId', '==', firebaseUser.uid));
+      const unsubscribeQrClaims = onSnapshot(qrClaimsQuery, (snapshot) => {
+        setQrClaims(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+
       return () => {
         unsubscribeUser();
         unsubscribeTickets();
+        unsubscribeQrClaims();
       };
     }
   }, [firebaseUser]);
@@ -238,37 +249,43 @@ export default function Profile() {
     setIsUploadingMoment(true);
 
     try {
-      let finalImageUrl = photoFormData.imageUrl;
+      let finalImageUrl = photoFormData.imagePreview;
 
-      if (photoFormData.imageFile) {
-        // Handle file upload (base64 for now as per project pattern)
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve) => {
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(photoFormData.imageFile!);
-        });
-        finalImageUrl = await base64Promise;
+      if (!finalImageUrl && photoFormData.imageFile) {
+        finalImageUrl = await compressImage(photoFormData.imageFile);
+      }
+
+      if (!finalImageUrl) {
+        alert("Please select an image first.");
+        setIsUploadingMoment(false);
+        return;
       }
 
       const newPhoto: UserPhoto = {
         id: Date.now().toString(),
-        url: finalImageUrl || `https://picsum.photos/seed/${Date.now()}/800/800`,
-        caption: photoFormData.caption,
+        url: finalImageUrl,
+        caption: (photoFormData.caption || '').trim(),
         date: new Date().toISOString().split('T')[0],
-        tag: photoFormData.tagName ? {
-          type: photoFormData.tagType,
-          name: photoFormData.tagName
-        } : undefined
       };
+
+      if (photoFormData.tagName) {
+        newPhoto.tag = {
+          type: photoFormData.tagType || 'Shop',
+          name: photoFormData.tagName
+        };
+      }
+
+      // Final safety check for undefined values
+      const sanitizedPhoto = JSON.parse(JSON.stringify(newPhoto));
 
       // Update Firestore
       const userRef = doc(db, 'users', firebaseUser.uid);
       await updateDoc(userRef, {
-        photos: arrayUnion(newPhoto)
+        photos: arrayUnion(sanitizedPhoto)
       });
 
       // Update local state
-      setPhotos([newPhoto, ...photos]);
+      setPhotos(prev => [...prev, sanitizedPhoto]);
       setIsAddingPhoto(false);
       setPhotoFormData({ 
         caption: '', 
@@ -421,6 +438,35 @@ export default function Profile() {
       setShowDeleteConfirm(false);
     } catch (e) {
       console.error('Error deleting ticket:', e);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    if (selectedPhotoIndex === null || !firebaseUser) return;
+    setIsDeleting(true);
+    try {
+      const reversedPhotos = Array.isArray(photos) ? photos.slice().reverse() : [];
+      const photoToDelete = reversedPhotos[selectedPhotoIndex];
+      if (!photoToDelete) {
+        setSelectedPhotoIndex(null);
+        setShowPhotoDeleteConfirm(false);
+        return;
+      }
+      const newPhotos = photos.filter(p => p.id !== photoToDelete.id);
+      
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      await updateDoc(userRef, { photos: newPhotos });
+      
+      // We don't necessarily need to setPhotos here as onSnapshot will handle it,
+      // but it's good for immediate feedback. We MUST clear the index first or simultaneously.
+      setSelectedPhotoIndex(null);
+      setShowPhotoDeleteConfirm(false);
+      setPhotos(newPhotos);
+    } catch (e) {
+      console.error('Error deleting photo:', e);
+      handleFirestoreError(e, OperationType.UPDATE, `users/${firebaseUser.uid}`);
     } finally {
       setIsDeleting(false);
     }
@@ -637,7 +683,9 @@ export default function Profile() {
         qrId: qrDoc.id,
         userId: firebaseUser.uid,
         claimedAt: serverTimestamp(),
-        pointsAwarded: points
+        pointsAwarded: points,
+        qrTitle: qrData.title,
+        qrType: qrData.type
       });
 
       // Update QR code usage count
@@ -687,36 +735,52 @@ export default function Profile() {
     // Give DOM time to render the reader div
     setTimeout(() => {
       if (!scannerRef.current) {
-        scannerRef.current = new Html5QrcodeScanner(
-          "qr-reader",
-          { fps: 10, qrbox: { width: 250, height: 250 } },
-          /* verbose= */ false
-        );
+        // Use Html5Qrcode instead of Html5QrcodeScanner for more control
+        const html5QrCode = new Html5Qrcode("qr-reader");
+        scannerRef.current = html5QrCode;
         
-        scannerRef.current.render(
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
           (decodedText) => {
-            // Success
-            if (scannerRef.current) {
-              scannerRef.current.clear().catch(console.error);
+            html5QrCode.stop().then(() => {
               scannerRef.current = null;
-            }
-            setIsScanning(false);
-            handleClaimPoints(undefined, decodedText);
+              setIsScanning(false);
+              handleClaimPoints(undefined, decodedText);
+            }).catch(console.error);
           },
           (error) => {
-            // Silently ignore scan errors (they happen constantly during search)
+            // Silently ignore scan errors
           }
-        );
+        ).catch(err => {
+          console.error("Camera start error:", err);
+          setClaimStatus({ type: 'error', message: "Could not access camera. Please check permissions." });
+          setIsScanning(false);
+          scannerRef.current = null;
+        });
       }
     }, 100);
   };
 
   const stopScanning = () => {
     if (scannerRef.current) {
-      scannerRef.current.clear().catch(console.error);
-      scannerRef.current = null;
+      const state = scannerRef.current.getState();
+      if (state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED) {
+        scannerRef.current.stop().then(() => {
+          scannerRef.current = null;
+          setIsScanning(false);
+        }).catch(err => {
+          console.error("Stop scanning error:", err);
+          scannerRef.current = null;
+          setIsScanning(false);
+        });
+      } else {
+        scannerRef.current = null;
+        setIsScanning(false);
+      }
+    } else {
+      setIsScanning(false);
     }
-    setIsScanning(false);
   };
 
   useEffect(() => {
@@ -1167,7 +1231,10 @@ export default function Profile() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsClaiming(false)}
+              onClick={() => {
+                stopScanning();
+                setIsClaiming(false);
+              }}
               className="absolute inset-0 bg-wine-black/60 backdrop-blur-sm"
             />
             <motion.div
@@ -1178,7 +1245,10 @@ export default function Profile() {
             >
               <div className="absolute top-0 right-0 p-6">
                 <button 
-                  onClick={() => setIsClaiming(false)}
+                  onClick={() => {
+                    stopScanning();
+                    setIsClaiming(false);
+                  }}
                   className="p-2 bg-wine-black/5 rounded-full text-wine-black hover:bg-wine-black/10 transition-colors"
                 >
                   <X className="w-4 h-4" />
@@ -1206,7 +1276,7 @@ export default function Profile() {
                 <div className="space-y-4">
                   {isScanning ? (
                     <div className="space-y-4">
-                      <div id="qr-reader" className="w-full aspect-square rounded-3xl overflow-hidden border-2 border-wine-red/20"></div>
+                      <div id="qr-reader" className="w-full aspect-square rounded-3xl overflow-hidden border-2 border-wine-red/20 bg-black"></div>
                       <button 
                         onClick={stopScanning}
                         className="w-full py-3 bg-wine-black/5 text-wine-black rounded-xl font-bold text-xs"
@@ -1221,9 +1291,9 @@ export default function Profile() {
                       className="w-full aspect-square bg-white border-2 border-dashed border-wine-black/10 rounded-3xl flex flex-col items-center justify-center gap-4 hover:border-wine-red/40 transition-all group relative overflow-hidden"
                     >
                       <div className="w-16 h-16 bg-wine-black/5 rounded-2xl flex items-center justify-center text-wine-black/20 group-hover:text-wine-red group-hover:bg-wine-red/10 transition-all">
-                        <QrCode className="w-10 h-10" />
+                        <Camera className="w-10 h-10" />
                       </div>
-                      <p className="text-xs font-bold text-wine-black/40 group-hover:text-wine-black transition-colors">Tap to Scan QR Code</p>
+                      <p className="text-xs font-bold text-wine-black/40 group-hover:text-wine-black transition-colors">Scan Savvy QR Code</p>
                     </button>
                   )}
 
@@ -1573,6 +1643,59 @@ export default function Profile() {
         </section>
       )}
 
+      {/* My Rewards & Offers Section */}
+      {qrClaims.length > 0 && (
+        <section className="px-6 space-y-4">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <Award className="w-5 h-5 text-wine-gold" />
+              <h3 className="text-lg font-bold">My Rewards & Offers</h3>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {qrClaims.sort((a, b) => (b.claimedAt?.seconds || 0) - (a.claimedAt?.seconds || 0)).map((claim) => (
+              <motion.div
+                key={claim.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-2xl p-4 flex justify-between items-center border border-wine-black/5 shadow-sm"
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    claim.qrType === 'Points' ? 'bg-emerald-50 text-emerald-600' : 
+                    claim.qrType === 'Discount' ? 'bg-wine-red/10 text-wine-red' : 
+                    'bg-wine-gold/10 text-wine-gold'
+                  }`}>
+                    {claim.qrType === 'Points' ? <Plus className="w-5 h-5" /> : 
+                     claim.qrType === 'Discount' ? <Tag className="w-5 h-5" /> : 
+                     <Star className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-wine-black">{claim.qrTitle || 'Claimed Reward'}</p>
+                    <p className="text-[10px] text-wine-black/40 font-medium">
+                      Claimed on {claim.claimedAt?.toDate?.()?.toLocaleDateString() || 'Just now'}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full ${
+                    claim.qrType === 'Points' ? 'bg-emerald-50 text-emerald-600' : 
+                    claim.qrType === 'Discount' ? 'bg-wine-red/10 text-wine-red' : 
+                    'bg-wine-gold/10 text-wine-gold'
+                  }`}>
+                    {claim.qrType}
+                  </span>
+                  {claim.pointsAwarded > 0 && (
+                    <p className="text-xs font-bold text-emerald-600 mt-1">+{claim.pointsAwarded} pts</p>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Ticket Detail Modal */}
       <AnimatePresence>
         {selectedTicket && (
@@ -1889,13 +2012,14 @@ export default function Profile() {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          {photos.slice().reverse().map((photo) => (
+        <div className="grid grid-cols-4 gap-2">
+          {photos.slice().reverse().map((photo, index) => (
             <motion.div
               key={photo.id}
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="group relative aspect-square rounded-3xl overflow-hidden shadow-md border border-wine-black/5"
+              onClick={() => setSelectedPhotoIndex(index)}
+              className="group relative aspect-square rounded-xl overflow-hidden shadow-sm border border-wine-black/5 cursor-pointer"
             >
               <img 
                 src={photo.url} 
@@ -1904,10 +2028,10 @@ export default function Profile() {
                 referrerPolicy="no-referrer"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-wine-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <div className="absolute bottom-0 left-0 right-0 p-3 translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
-                <p className="text-white text-[10px] font-medium line-clamp-2 mb-1">{photo.caption}</p>
+              <div className="absolute bottom-0 left-0 right-0 p-2 translate-y-4 group-hover:translate-y-0 transition-transform duration-300">
+                <p className="text-white text-[8px] font-medium line-clamp-1 mb-0.5">{photo.caption}</p>
                 {photo.tag && (
-                  <div className="flex items-center gap-1 text-wine-gold text-[8px] font-bold uppercase tracking-widest">
+                  <div className="flex items-center gap-0.5 text-wine-gold text-[7px] font-bold uppercase tracking-widest">
                     <MapPin className="w-2 h-2" /> {photo.tag.name}
                   </div>
                 )}
@@ -1916,6 +2040,153 @@ export default function Profile() {
           ))}
         </div>
       </section>
+
+      {/* Photo Lightbox */}
+      <AnimatePresence>
+        {selectedPhotoIndex !== null && Array.isArray(photos) && photos.length > 0 && (
+          (() => {
+            const reversedPhotos = photos.slice().reverse();
+            const currentPhoto = reversedPhotos[selectedPhotoIndex];
+            
+            if (!currentPhoto) {
+              // Safety check: if index is out of bounds (e.g. after a deletion)
+              // We should close the lightbox to avoid crashes
+              setTimeout(() => setSelectedPhotoIndex(null), 0);
+              return null;
+            }
+
+            return (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setSelectedPhotoIndex(null)}
+                  className="absolute inset-0 bg-wine-black/95 backdrop-blur-md"
+                />
+                
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="relative w-full max-w-4xl h-full flex flex-col items-center justify-center"
+                >
+                  <div className="absolute top-0 right-0 p-4 flex items-center gap-4 z-20">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowPhotoDeleteConfirm(true);
+                      }}
+                      className="p-2 text-white/40 hover:text-wine-red transition-colors bg-white/5 rounded-full backdrop-blur-sm"
+                      title="Delete Moment"
+                    >
+                      <Trash2 className="w-6 h-6" />
+                    </button>
+                    <button 
+                      onClick={() => setSelectedPhotoIndex(null)}
+                      className="p-2 text-white/40 hover:text-white transition-colors bg-white/5 rounded-full backdrop-blur-sm"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+
+                  <div className="relative w-full flex-1 flex items-center justify-center overflow-hidden">
+                    {photos.length > 1 && (
+                      <>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedPhotoIndex((prev) => (prev! === 0 ? photos.length - 1 : prev! - 1));
+                          }}
+                          className="absolute left-0 z-10 p-4 text-white/40 hover:text-white transition-colors bg-white/5 rounded-full backdrop-blur-sm ml-2"
+                        >
+                          <ChevronLeft className="w-10 h-10" />
+                        </button>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedPhotoIndex((prev) => (prev! === photos.length - 1 ? 0 : prev! + 1));
+                          }}
+                          className="absolute right-0 z-10 p-4 text-white/40 hover:text-white transition-colors bg-white/5 rounded-full backdrop-blur-sm mr-2"
+                        >
+                          <ChevronRight className="w-10 h-10" />
+                        </button>
+                      </>
+                    )}
+
+                    <img 
+                      src={currentPhoto.url} 
+                      alt="Full View" 
+                      className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+
+                  <div className="w-full bg-gradient-to-t from-wine-black to-transparent p-8 text-center space-y-3">
+                    <p className="text-white text-xl font-serif font-bold tracking-wide">
+                      {currentPhoto.caption}
+                    </p>
+                    {currentPhoto.tag && (
+                      <div className="flex items-center justify-center gap-2 text-wine-gold font-bold uppercase tracking-[0.2em] text-xs">
+                        <MapPin className="w-4 h-4" /> {currentPhoto.tag?.name}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-center gap-4 text-white/40 text-[10px] font-mono uppercase tracking-widest">
+                      <span>{currentPhoto.date}</span>
+                      <span className="w-1 h-1 bg-white/20 rounded-full" />
+                      <span>{selectedPhotoIndex + 1} / {photos.length}</span>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            );
+          })()
+        )}
+      </AnimatePresence>
+
+      {/* Photo Delete Confirmation */}
+      <AnimatePresence>
+        {showPhotoDeleteConfirm && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowPhotoDeleteConfirm(false)}
+              className="absolute inset-0 bg-wine-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-sm bg-wine-cream rounded-3xl p-8 shadow-2xl border border-wine-red/10 text-center"
+            >
+              <div className="w-16 h-16 bg-wine-red/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="w-8 h-8 text-wine-red" />
+              </div>
+              <h3 className="text-xl font-serif font-bold text-wine-black mb-2">Delete Moment?</h3>
+              <p className="text-wine-black/60 text-sm mb-8">
+                Are you sure you want to remove this wine moment from your gallery? This action cannot be undone.
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleDeletePhoto}
+                  disabled={isDeleting}
+                  className="w-full bg-wine-red text-white py-4 rounded-2xl font-bold text-sm shadow-lg hover:bg-wine-red/90 transition-all disabled:opacity-50"
+                >
+                  {isDeleting ? 'Deleting...' : 'Yes, Delete'}
+                </button>
+                <button
+                  onClick={() => setShowPhotoDeleteConfirm(false)}
+                  className="w-full bg-wine-black/5 text-wine-black py-4 rounded-2xl font-bold text-sm hover:bg-wine-black/10 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Add Photo Modal */}
       <AnimatePresence>
@@ -1932,9 +2203,9 @@ export default function Profile() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-sm bg-wine-cream rounded-[2.5rem] p-8 shadow-2xl overflow-hidden"
+              className="relative w-full max-w-[320px] bg-wine-cream rounded-[2rem] p-6 shadow-2xl overflow-hidden"
             >
-              <div className="absolute top-0 right-0 p-6">
+              <div className="absolute top-0 right-0 p-4">
                 <button 
                   onClick={() => setIsAddingPhoto(false)}
                   className="p-2 bg-wine-black/5 rounded-full text-wine-black hover:bg-wine-black/10 transition-colors"
@@ -1943,82 +2214,103 @@ export default function Profile() {
                 </button>
               </div>
 
-              <div className="space-y-6">
-                <div className="space-y-2 text-center">
-                  <div className="w-16 h-16 bg-wine-red/10 rounded-2xl flex items-center justify-center text-wine-red mx-auto mb-2">
-                    <Camera className="w-8 h-8" />
+              <div className="space-y-3">
+                <div className="space-y-1 text-center">
+                  <div className="w-12 h-12 bg-wine-red/10 rounded-2xl flex items-center justify-center text-wine-red mx-auto mb-2">
+                    <Camera className="w-6 h-6" />
                   </div>
-                  <h3 className="text-2xl font-serif font-bold text-wine-black">Share a Moment</h3>
-                  <p className="text-wine-black/40 text-xs">Capture and tag your wine experiences.</p>
+                  <h3 className="text-xl font-serif font-bold text-wine-black">Share a Moment</h3>
+                  <p className="text-wine-black/40 text-[10px] tracking-wide">Capture and tag your wine experiences.</p>
                 </div>
 
                 <form onSubmit={handleAddPhoto} className="space-y-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-wine-black/40 ml-1">Caption</label>
-                    <textarea
-                      placeholder="Tell us about this experience..."
-                      className="w-full bg-white border border-wine-black/5 rounded-2xl py-4 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-wine-red/20 transition-all resize-none h-24"
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold uppercase tracking-[0.2em] text-wine-black/40 ml-1">Caption</label>
+                    <input
+                      type="text"
+                      placeholder="What's happening?"
+                      className="w-full bg-white border border-wine-black/5 rounded-xl py-2.5 px-4 text-xs focus:outline-none focus:ring-2 focus:ring-wine-red/20 transition-all placeholder:text-wine-black/20"
                       value={photoFormData.caption}
                       onChange={(e) => setPhotoFormData({ ...photoFormData, caption: e.target.value })}
                       required
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-wine-black/40 ml-1">Tag Location</label>
-                    <div className="grid grid-cols-3 gap-2 mb-2">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-bold uppercase tracking-[0.2em] text-wine-black/40 ml-1">Tag Location</label>
+                    <div className="grid grid-cols-3 gap-1.5 mb-2">
                       {['Shop', 'Hotel', 'Event'].map((type) => (
                         <button
                           key={type}
                           type="button"
-                          onClick={() => setPhotoFormData({ ...photoFormData, tagType: type as any })}
-                          className={`py-2 rounded-xl border text-[10px] font-bold transition-all ${
+                          onClick={() => setPhotoFormData({ ...photoFormData, tagType: type as any, tagName: '' })}
+                          className={`py-2 rounded-xl border text-[9px] font-bold transition-all ${
                             photoFormData.tagType === type
-                              ? 'bg-wine-black border-wine-black text-white'
-                              : 'bg-white border-wine-black/5 text-wine-black'
+                              ? 'bg-wine-black border-wine-black text-white shadow-md'
+                              : 'bg-white border-wine-black/5 text-wine-black hover:border-wine-red/30'
                           }`}
                         >
                           {type}
                         </button>
                       ))}
                     </div>
-                    <div className="relative">
-                      <Tag className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-wine-black/20" />
-                      <select
-                        className="w-full bg-white border border-wine-black/5 rounded-2xl py-4 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-wine-red/20 transition-all appearance-none"
-                        value={photoFormData.tagName}
-                        onChange={(e) => setPhotoFormData({ ...photoFormData, tagName: e.target.value })}
-                        required
-                      >
-                        <option value="">Select {photoFormData.tagType}</option>
-                        {photoFormData.tagType === 'Event' ? (
-                          dynamicEvents.map(e => <option key={e.id} value={e.title}>{e.title}</option>)
-                        ) : (
-                          dynamicStores.filter(s => s.type === (photoFormData.tagType === 'Shop' ? 'Wine Shop' : 'Hotel')).map(s => (
-                            <option key={s.id} value={s.name}>{s.name}</option>
-                          ))
-                        )}
-                      </select>
+                    
+                    <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
+                      {(photoFormData.tagType === 'Event' ? dynamicEvents : dynamicStores.filter(s => {
+                        if (photoFormData.tagType === 'Shop') {
+                          return s.type !== 'Hotel';
+                        }
+                        return s.type === 'Hotel';
+                      })).map((item: any) => {
+                        const name = item.title || item.name;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setPhotoFormData({ ...photoFormData, tagName: name })}
+                            className={`px-3 py-2 rounded-xl border text-left transition-all ${
+                              photoFormData.tagName === name
+                                ? 'bg-wine-red border-wine-red text-white shadow-sm'
+                                : 'bg-white border-wine-black/5 text-wine-black hover:border-wine-red/40'
+                            }`}
+                          >
+                            <p className="text-[9px] font-bold truncate">{name}</p>
+                            <p className="text-[7px] opacity-60 truncate">{item.location || item.address}</p>
+                          </button>
+                        );
+                      })}
+                      {(photoFormData.tagType === 'Event' ? dynamicEvents : dynamicStores.filter(s => {
+                        if (photoFormData.tagType === 'Shop') {
+                          return s.type !== 'Hotel';
+                        }
+                        return s.type === 'Hotel';
+                      })).length === 0 && (
+                        <div className="col-span-2 py-4 text-center bg-white/50 rounded-xl border border-dashed border-wine-black/5">
+                          <p className="text-[9px] text-wine-black/40 italic">No {photoFormData.tagType}s available</p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-wine-black/40 ml-1">Photo</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold uppercase tracking-[0.2em] text-wine-black/40 ml-1">Photo</label>
                     <div 
                       onClick={() => momentFileInputRef.current?.click()}
-                      className="w-full aspect-video bg-white border-2 border-dashed border-wine-black/10 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-wine-black/5 transition-all overflow-hidden relative"
+                      className="w-full aspect-video bg-white border-2 border-dashed border-wine-black/10 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-wine-black/5 transition-all overflow-hidden relative group"
                     >
                       {photoFormData.imagePreview ? (
                         <>
                           <img src={photoFormData.imagePreview} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                            <p className="text-white text-xs font-bold">Change Photo</p>
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[2px]">
+                            <p className="text-white text-[10px] font-bold uppercase tracking-widest">Change Photo</p>
                           </div>
                         </>
                       ) : (
                         <>
-                          <ImageIcon className="w-8 h-8 text-wine-black/20 mb-2" />
-                          <p className="text-[10px] font-bold text-wine-black/40 uppercase tracking-widest">Upload from Gallery</p>
+                          <div className="w-10 h-10 rounded-full bg-wine-red/5 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                            <ImageIcon className="w-5 h-5 text-wine-red/40" />
+                          </div>
+                          <p className="text-[9px] font-bold text-wine-black/40 uppercase tracking-[0.2em]">Upload Gallery</p>
                         </>
                       )}
                     </div>
@@ -2054,32 +2346,21 @@ export default function Profile() {
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-wine-black/40 ml-1">Or Photo URL (Optional)</label>
-                    <div className="relative">
-                      <ImageIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-wine-black/20" />
-                      <input
-                        type="url"
-                        placeholder="https://..."
-                        className="w-full bg-white border border-wine-black/5 rounded-2xl py-4 pl-12 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-wine-red/20 transition-all"
-                        value={photoFormData.imageUrl}
-                        onChange={(e) => setPhotoFormData({ ...photoFormData, imageUrl: e.target.value, imageFile: null, imagePreview: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
                   <button
                     type="submit"
-                    disabled={isUploadingMoment}
-                    className="w-full bg-wine-red text-white py-4 rounded-2xl font-bold text-sm shadow-lg shadow-wine-red/20 hover:bg-wine-red/90 transition-all mt-4 flex items-center justify-center gap-2 disabled:opacity-50"
+                    disabled={isUploadingMoment || !photoFormData.imagePreview}
+                    className="w-full bg-wine-red text-white py-4 rounded-2xl font-bold text-xs tracking-[0.2em] uppercase shadow-xl shadow-wine-red/20 hover:bg-wine-red/90 transition-all mt-2 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98]"
                   >
                     {isUploadingMoment ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Sharing...
+                        <span>Sharing...</span>
                       </>
                     ) : (
-                      'Share Moment'
+                      <>
+                        <Share2 className="w-4 h-4" />
+                        <span>Share Moment</span>
+                      </>
                     )}
                   </button>
                 </form>
@@ -2088,39 +2369,6 @@ export default function Profile() {
           </div>
         )}
       </AnimatePresence>
-
-      {/* Activity History */}
-      <section className="px-6 space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-lg font-bold">Activity History</h3>
-          <button className="text-wine-red text-xs font-bold">View All</button>
-        </div>
-        
-        <div className="space-y-3">
-          {user.activityHistory.map((activity, i) => (
-            <motion.div
-              key={activity.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="bg-white rounded-2xl p-4 flex justify-between items-center border border-wine-black/5 shadow-sm"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-wine-cream rounded-xl flex items-center justify-center text-wine-red">
-                  {activity.type === 'Event' ? <Award className="w-5 h-5" /> : activity.type === 'Purchase' ? <History className="w-5 h-5" /> : <Star className="w-5 h-5" />}
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-wine-black">{activity.title}</p>
-                  <p className="text-[10px] text-wine-black/40 font-medium">{activity.date}</p>
-                </div>
-              </div>
-              <div className="text-emerald-500 font-bold text-sm">
-                +{activity.points} pts
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
 
       {/* Menu Options */}
       <section className="px-6 pb-12 space-y-2">

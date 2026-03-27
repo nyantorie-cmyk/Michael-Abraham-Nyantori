@@ -8,6 +8,7 @@
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
+        "phone": { "type": "string" },
         "photoURL": { "type": "string" },
         "role": { "type": "string", "enum": ["admin", "user"] },
         "type": { "type": "string", "enum": ["Individual", "Business"] },
@@ -18,7 +19,27 @@
         "businessName": { "type": "string" },
         "businessLocation": { "type": "string" },
         "membershipId": { "type": "string" },
-        "rank": { "type": "number" }
+        "rank": { "type": "number" },
+        "savedEvents": { "type": "array", "items": { "type": "string" } },
+        "photos": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "url": { "type": "string" },
+              "caption": { "type": "string" },
+              "date": { "type": "string" },
+              "tag": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string", "enum": ["Shop", "Hotel", "Event"] },
+                  "name": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
       },
       "required": ["uid", "name", "email"]
     },
@@ -196,7 +217,9 @@
         "qrId": { "type": "string" },
         "userId": { "type": "string" },
         "claimedAt": { "type": "string", "format": "date-time" },
-        "pointsAwarded": { "type": "number" }
+        "pointsAwarded": { "type": "number" },
+        "qrTitle": { "type": "string" },
+        "qrType": { "type": "string" }
       },
       "required": ["qrId", "userId", "claimedAt"]
     },
