@@ -1,0 +1,270 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "type": { "type": "string", "enum": ["Individual", "Business"] },
+        "loyaltyScore": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "friends": { "type": "array", "items": { "type": "string" } },
+        "attendedEvents": { "type": "number" },
+        "businessName": { "type": "string" },
+        "businessLocation": { "type": "string" },
+        "membershipId": { "type": "string" },
+        "rank": { "type": "number" }
+      },
+      "required": ["uid", "name", "email"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Shop order details",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "packed", "on transit", "delivered", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "shippingAddress": { "type": "string" },
+        "phone": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "userEmail", "items", "total", "status", "createdAt", "shippingAddress", "phone"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Comment on a news item",
+      "type": "object",
+      "properties": {
+        "newsId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userAvatar": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["newsId", "userId", "userName", "text", "createdAt"]
+    },
+    "Registration": {
+      "title": "Registration",
+      "description": "Event registration",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "userId", "userName", "userEmail", "createdAt"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Digital ticket for an event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "eventId": { "type": "string" },
+        "eventTitle": { "type": "string" },
+        "eventDate": { "type": "string" },
+        "eventTime": { "type": "string" },
+        "eventLocation": { "type": "string" },
+        "eventVenue": { "type": "string" },
+        "qrCode": { "type": "string" },
+        "purchaseDate": { "type": "string", "format": "date-time" },
+        "paymentStatus": { "type": "string", "enum": ["pending", "paid"] },
+        "price": { "type": "number" }
+      },
+      "required": ["id", "userId", "eventId", "eventTitle", "eventDate", "qrCode", "purchaseDate", "paymentStatus"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notification for a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["EventAnnouncement", "FriendRequest", "LoyaltyUpdate", "SpecialOffer", "General", "FriendUpdate"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "isRead": { "type": "boolean" },
+        "link": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "title", "message", "timestamp", "isRead"]
+    },
+    "News": {
+      "title": "News",
+      "description": "Wine news article",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "source": { "type": "string" },
+        "image": { "type": "string" },
+        "date": { "type": "string" },
+        "comments": { "type": "array", "items": { "type": "object" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "summary", "content", "category", "source", "image", "date", "comments", "createdAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Wine event details",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "location": { "type": "string" },
+        "venue": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "price": { "type": "number" },
+        "isPast": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "date", "location", "description", "image", "isPast", "createdAt"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "Wine store or social hall location",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Liquor Store", "Social Hall", "Supermarket", "Wholesale", "Bar and Lounge", "Hotel"] },
+        "address": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "phone": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type", "address", "lat", "lng", "phone", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Wine product in the shop",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "image": { "type": "string" },
+        "category": { "type": "string" },
+        "stock": { "type": "number" },
+        "rating": { "type": "number" },
+        "reviews": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "description", "price", "image", "category", "stock", "createdAt"]
+    },
+    "QRCode": {
+      "title": "QRCode",
+      "description": "QR code for claiming offers or points",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["Points", "Discount", "Reward"] },
+        "value": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "usageLimit": { "type": "number" },
+        "usageCount": { "type": "number" },
+        "expiryDate": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "title", "type", "isActive", "createdAt"]
+    },
+    "QRClaim": {
+      "title": "QRClaim",
+      "description": "Record of a user claiming a QR code",
+      "type": "object",
+      "properties": {
+        "qrId": { "type": "string" },
+        "userId": { "type": "string" },
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "pointsAwarded": { "type": "number" }
+      },
+      "required": ["qrId", "userId", "claimedAt"]
+    },
+    "ReferralClaim": {
+      "title": "ReferralClaim",
+      "description": "Record of a user claiming a referral code",
+      "type": "object",
+      "properties": {
+        "referralCode": { "type": "string" },
+        "userId": { "type": "string" },
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "pointsAwarded": { "type": "number" }
+      },
+      "required": ["referralCode", "userId", "claimedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/news/{newsId}": {
+      "schema": "News",
+      "description": "Wine news articles"
+    },
+    "/news/{newsId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comments on news items"
+    },
+    "/registrations/{registrationId}": {
+      "schema": "Registration",
+      "description": "Event registrations"
+    },
+    "/tickets/{ticketId}": {
+      "schema": "Ticket",
+      "description": "Digital tickets"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    },
+    "/events/{eventId}": {
+      "schema": "Event",
+      "description": "Wine events"
+    },
+    "/stores/{storeId}": {
+      "schema": "Store",
+      "description": "Wine store locations"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Shop products"
+    },
+    "/qrcodes/{qrId}": {
+      "schema": "QRCode",
+      "description": "Admin generated QR codes"
+    },
+    "/qrclaims/{claimId}": {
+      "schema": "QRClaim",
+      "description": "User claims of QR codes"
+    },
+    "/referralclaims/{claimId}": {
+      "schema": "ReferralClaim",
+      "description": "User claims of referral codes"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Shop orders"
+    }
+  }
+}

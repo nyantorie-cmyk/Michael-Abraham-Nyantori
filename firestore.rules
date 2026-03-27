@@ -1,0 +1,322 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email']) &&
+             data.uid is string &&
+             data.name is string &&
+             data.email is string &&
+             (!('role' in data) || (data.role in ['admin', 'user'])) &&
+             (!('photoURL' in data) || (data.photoURL is string)) &&
+             (!('loyaltyScore' in data) || (data.loyaltyScore is number)) &&
+             (!('type' in data) || (data.type in ['Individual', 'Business'])) &&
+             (!('friends' in data) || (data.friends is list)) &&
+             (!('attendedEvents' in data) || (data.attendedEvents is number)) &&
+             (!('businessName' in data) || (data.businessName is string || data.businessName == null)) &&
+             (!('businessLocation' in data) || (data.businessLocation is string || data.businessLocation == null)) &&
+             (!('membershipId' in data) || (data.membershipId is string)) &&
+             (!('rank' in data) || (data.rank is number)) &&
+             (!('city' in data) || (data.city is string)) &&
+             (!('hasEarnedProfileReward' in data) || (data.hasEarnedProfileReward is bool)) &&
+             (!('referralCode' in data) || (data.referralCode is string)) &&
+             (!('photos' in data) || (data.photos is list)) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('id' in data) || data.id is string);
+    }
+
+    function isValidNews(data) {
+      return data.keys().hasAll(['title', 'summary', 'content', 'category', 'source', 'image', 'date', 'comments', 'createdAt']) &&
+             data.title is string &&
+             data.summary is string &&
+             data.content is string &&
+             data.category is string &&
+             data.source is string &&
+             data.image is string &&
+             data.date is string &&
+             data.comments is list &&
+             data.createdAt is timestamp &&
+             (!('views' in data) || data.views is number) &&
+             (!('commentCount' in data) || data.commentCount is number) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('id' in data) || data.id is string);
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['newsId', 'userId', 'userName', 'text', 'createdAt']) &&
+             data.newsId is string && data.newsId.size() < 128 &&
+             data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() > 0 && data.userName.size() < 100 &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 1000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll(['eventId', 'userId', 'userName', 'userEmail', 'createdAt']) &&
+             data.eventId is string && data.eventId.size() < 128 &&
+             data.userId == request.auth.uid &&
+             data.userName is string && data.userName.size() < 100 &&
+             data.userEmail is string && data.userEmail.size() < 128 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTicket(data) {
+      return data.keys().hasAll(['id', 'userId', 'eventId', 'eventTitle', 'eventDate', 'qrCode', 'purchaseDate', 'paymentStatus']) &&
+             data.id is string && data.id.size() < 128 &&
+             data.userId is string && data.userId.size() < 128 &&
+             data.eventId is string && data.eventId.size() < 128 &&
+             data.eventTitle is string && data.eventTitle.size() < 200 &&
+             data.eventDate is string && data.eventDate.size() < 50 &&
+             data.qrCode is string && data.qrCode.size() < 256 &&
+             data.purchaseDate is string && data.purchaseDate.size() < 50 &&
+             data.paymentStatus in ['pending', 'paid'] &&
+             (!('eventTime' in data) || data.eventTime is string) &&
+             (!('eventLocation' in data) || data.eventLocation is string) &&
+             (!('eventVenue' in data) || data.eventVenue is string) &&
+             (!('price' in data) || data.price is number);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'type', 'title', 'message', 'timestamp', 'isRead']) &&
+             data.id is string && data.id.size() < 128 &&
+             data.userId is string && data.userId.size() < 128 &&
+             data.type in ['EventAnnouncement', 'FriendRequest', 'LoyaltyUpdate', 'SpecialOffer', 'General', 'FriendUpdate'] &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 1000 &&
+             data.timestamp is string && data.timestamp.size() < 50 &&
+             data.isRead is bool &&
+             (!('link' in data) || (data.link is string && data.link.size() < 512)) &&
+             (!('metadata' in data) || (data.metadata is map));
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['title', 'date', 'location', 'description', 'image', 'isPast', 'createdAt']) &&
+             data.title is string &&
+             data.date is string &&
+             data.location is string &&
+             data.description is string &&
+             data.image is string &&
+             data.isPast is bool &&
+             data.createdAt is timestamp &&
+             (!('time' in data) || data.time is string) &&
+             (!('venue' in data) || data.venue is string) &&
+             (!('price' in data) || (data.price is number || data.price is string)) &&
+             (!('hosts' in data) || data.hosts is list) &&
+             (!('specialGuest' in data) || data.specialGuest is string) &&
+             (!('attendeeCount' in data) || data.attendeeCount is number) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('id' in data) || data.id is string);
+    }
+
+    function isValidStore(data) {
+      return data.keys().hasAll(['name', 'type', 'address', 'lat', 'lng', 'phone', 'createdAt']) &&
+             data.name is string &&
+             data.type is string &&
+             data.address is string &&
+             data.lat is number && data.lng is number &&
+             data.phone is string &&
+             data.createdAt is timestamp &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('id' in data) || data.id is string);
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'description', 'price', 'image', 'category', 'stock', 'createdAt']) &&
+             data.name is string &&
+             data.description is string &&
+             data.price is number &&
+             data.image is string &&
+             data.category is string &&
+             data.stock is number &&
+             data.createdAt is timestamp &&
+             (!('rating' in data) || data.rating is number) &&
+             (!('reviews' in data) || data.reviews is number) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('id' in data) || data.id is string);
+    }
+
+    function isValidQRCode(data) {
+      return data.keys().hasAll(['code', 'title', 'type', 'isActive', 'createdAt']) &&
+             data.code is string &&
+             data.title is string &&
+             data.type in ["Points", "Discount", "Reward"] &&
+             data.isActive is bool &&
+             data.createdAt is timestamp &&
+             (!('description' in data) || data.description is string) &&
+             (!('value' in data) || data.value is number) &&
+             (!('usageLimit' in data) || data.usageLimit is number) &&
+             (!('usageCount' in data) || data.usageCount is number) &&
+             (!('expiryDate' in data) || data.expiryDate is timestamp) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('id' in data) || data.id is string);
+    }
+
+    function isValidQRClaim(data) {
+      return data.keys().hasAll(['qrId', 'userId', 'claimedAt']) &&
+             data.qrId is string &&
+             data.userId == request.auth.uid &&
+             data.claimedAt is timestamp &&
+             (!('pointsAwarded' in data) || data.pointsAwarded is number);
+    }
+
+    function isValidReferralClaim(data) {
+      return data.keys().hasAll(['referralCode', 'userId', 'claimedAt']) &&
+             data.referralCode is string &&
+             data.userId == request.auth.uid &&
+             data.claimedAt is timestamp &&
+             (!('pointsAwarded' in data) || data.pointsAwarded is number);
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['userId', 'userName', 'userEmail', 'items', 'total', 'status', 'createdAt', 'shippingAddress', 'phone']) &&
+             data.userId is string &&
+             data.userName is string &&
+             data.userEmail is string &&
+             data.items is list &&
+             data.total is number &&
+             data.status in ['pending', 'packed', 'on transit', 'delivered', 'cancelled'] &&
+             (data.createdAt is timestamp || data.createdAt is string) &&
+             data.shippingAddress is string &&
+             data.phone is string &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    match /counters/{counterId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /users/{userId} {
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated(); // Allow leaderboard for everyone
+      allow create: if isOwner(userId) && 
+                      isValidUser(request.resource.data) && 
+                      (request.resource.data.role == 'user' || isAdmin());
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                      isValidUser(request.resource.data) && 
+                      (request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /news/{newsId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidNews(request.resource.data);
+      allow update: if (isAdmin() && isValidNews(request.resource.data)) ||
+                    (isAuthenticated() && 
+                     request.resource.data.diff(resource.data).affectedKeys().hasAny(['views', 'commentCount']) &&
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'commentCount']) &&
+                     (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['views']) || request.resource.data.views == resource.data.views + 1) &&
+                     (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['commentCount']) || request.resource.data.commentCount == resource.data.commentCount + 1));
+      allow delete: if isAdmin();
+    }
+
+    match /news/{newsId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidComment(request.resource.data);
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId && isValidComment(request.resource.data);
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    match /registrations/{registrationId} {
+      allow get: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() && isValidRegistration(request.resource.data);
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    match /tickets/{ticketId} {
+      allow get: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow list: if isAdmin() || (isAuthenticated() && request.query.limit <= 100); // Allow users to list their own tickets if filtered
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidTicket(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin()) && 
+                    isValidTicket(request.resource.data) && 
+                    request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow list: if isAuthenticated(); // Users can list their own notifications
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data); 
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin()) && isValidNotification(request.resource.data);
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidEvent(request.resource.data);
+      allow update: if (isAdmin() && isValidEvent(request.resource.data)) ||
+                    (isAuthenticated() && 
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendeeCount']) &&
+                     request.resource.data.attendeeCount == resource.data.attendeeCount + 1);
+      allow delete: if isAdmin();
+    }
+
+    match /stores/{storeId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidStore(request.resource.data);
+      allow update: if isAdmin() && isValidStore(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidProduct(request.resource.data);
+      allow update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /qrcodes/{qrId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidQRCode(request.resource.data);
+      allow update: if (isAdmin() && isValidQRCode(request.resource.data)) ||
+                    (isAuthenticated() && 
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usageCount']) &&
+                     request.resource.data.usageCount == resource.data.usageCount + 1);
+      allow delete: if isAdmin();
+    }
+
+    match /qrclaims/{claimId} {
+      allow get: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() && 
+                      isValidQRClaim(request.resource.data) && 
+                      claimId == request.auth.uid + "_" + request.resource.data.qrId;
+      allow delete: if isAdmin();
+    }
+
+    match /referralclaims/{claimId} {
+      allow get: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() && 
+                      isValidReferralClaim(request.resource.data) && 
+                      claimId == request.auth.uid + "_" + request.resource.data.referralCode;
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidOrder(request.resource.data);
+      allow update: if isAdmin() && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'updatedAt']) &&
+                    request.resource.data.status in ['pending', 'packed', 'on transit', 'delivered', 'cancelled'];
+      allow delete: if isAdmin();
+    }
+  }
+}
