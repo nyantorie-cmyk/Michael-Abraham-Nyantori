@@ -107,7 +107,7 @@ async function startServer() {
 
     try {
       const { data, error } = await resend.emails.send({
-        from: 'Savvy Wine Community <onboarding@resend.dev>',
+        from: 'Wine App <onboarding@resend.dev>',
         to: [email],
         subject: `Registration Confirmed: ${eventTitle}`,
         html: `
@@ -131,7 +131,7 @@ async function startServer() {
             </div>
 
             <p style="margin-top: 30px; font-size: 14px; color: #666; text-align: center;">
-              Thank you for being part of the Savvy Wine Community.
+              Thank you for being part of the Wine App Community.
             </p>
           </div>
         `,

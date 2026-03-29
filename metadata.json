@@ -1,5 +1,5 @@
 {
-  "name": "Savvy Wine",
+  "name": "Wine App",
   "description": "A premium lifestyle mobile app for wine enthusiasts, featuring events, a loyalty program, store locator, and an exclusive online shop.",
   "requestFramePermissions": [
     "geolocation",
